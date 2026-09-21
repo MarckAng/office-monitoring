@@ -3,34 +3,34 @@
 namespace App\Http\Controllers;
 
 use App\Models\Division;
-use App\Models\UrgentItem;
 use App\Models\Event;
-use App\Models\PaymentPeriod;
 use App\Models\PaymentItem;
-use Illuminate\Http\Request;
-use Inertia\Inertia;
-use Illuminate\Support\Facades\Log;
+use App\Models\PaymentPeriod;
+use App\Models\UrgentItem;
 use Carbon\Carbon;
-use App\Http\Controllers\DashboardController;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Inertia\Inertia;
 
 class EditorController extends Controller
 {
-
     public function index()
     {
         $divisions = Division::with('tasks')->orderBy('display_order')->get();
         $urgent = UrgentItem::orderBy('display_order')->get();
         $events = Event::orderBy('date')->get();
         $payments = PaymentPeriod::with('items')->orderBy('display_order')->get();
-        
+
         // Format dates as yyyy-MM-dd strings (not ISO timestamps)
-        $events->transform(function($event) {
+        $events->transform(function ($event) {
             $event->date = $event->date instanceof \DateTime
                 ? $event->date->format('Y-m-d')
                 : (is_string($event->date) ? substr($event->date, 0, 10) : $event->date);
+
             return $event;
         });
-        
+
         return Inertia::render('Editor', [
             'divisions' => $divisions,
             'urgent' => $urgent,
@@ -38,75 +38,90 @@ class EditorController extends Controller
             'payments' => $payments,
         ]);
     }
+
     public function saveTasks(Request $request)
     {
-        // Accept 'divisions' key or root-level array
-        $data = $request->input('divisions') ?? $request->all();
+        $validated = $request->validate([
+            'divisions' => ['present', 'array'],
+            'divisions.*' => ['array:name,abbr,tasks'],
+            'divisions.*.name' => ['required', 'string', 'max:255'],
+            'divisions.*.abbr' => ['nullable', 'string', 'max:255'],
+            'divisions.*.tasks' => ['required', 'array'],
+            'divisions.*.tasks.*' => ['array:title,status,due_date'],
+            'divisions.*.tasks.*.title' => ['required', 'string', 'max:255'],
+            'divisions.*.tasks.*.status' => ['required', 'in:ongoing,pending,done'],
+            'divisions.*.tasks.*.due_date' => ['nullable', 'date'],
+        ]);
 
-        if (!is_array($data) || empty($data)) {
-            return response()->json(['success' => true, 'message' => 'No data']);
-        }
+        DB::transaction(function () use ($validated): void {
+            Division::query()->delete();
 
-        foreach ($data as $divisionData) {
-            if (!is_array($divisionData)) continue;
-            $division = Division::find($divisionData['id']);
-            if ($division) {
-                $division->tasks()->delete();
-                foreach ($divisionData['tasks'] as $index => $taskData) {
+            foreach ($validated['divisions'] as $divisionIndex => $divisionData) {
+                $division = Division::create([
+                    'name' => $divisionData['name'],
+                    'abbr' => $divisionData['abbr'] ?? '',
+                    'display_order' => $divisionIndex,
+                ]);
+
+                foreach ($divisionData['tasks'] as $taskIndex => $taskData) {
                     $division->tasks()->create([
                         'title' => $taskData['title'],
                         'status' => $taskData['status'],
                         'due_date' => $taskData['due_date'] ?? null,
-                        'display_order' => $index
+                        'display_order' => $taskIndex,
                     ]);
                 }
             }
-        }
+        });
 
         DashboardController::clearCache();
+
         return response()->json(['success' => true]);
     }
-    
+
     public function saveUrgent(Request $request)
     {
         // Accept 'urgent' key or root-level array
         $data = $request->input('urgent') ?? $request->all();
 
-        if (!is_array($data) || empty($data)) {
+        if (! is_array($data) || empty($data)) {
             UrgentItem::truncate();
+
             return response()->json(['success' => true, 'message' => 'No data']);
         }
 
         UrgentItem::truncate();
-        
+
         foreach ($data as $index => $item) {
             UrgentItem::create([
                 'title' => $item['title'],
                 'division' => $item['division'] ?? '',
                 'priority' => $item['priority'],
                 'due' => $item['due'],
-                'display_order' => $index
+                'display_order' => $index,
             ]);
         }
 
         DashboardController::clearCache();
+
         return response()->json(['success' => true]);
     }
-    
+
     public function saveEvents(Request $request)
     {
         // Accept 'events' key or root-level array
         $data = $request->input('events') ?? $request->all();
 
-        if (!is_array($data) || empty($data)) {
+        if (! is_array($data) || empty($data)) {
             Event::truncate();
+
             return response()->json(['success' => true, 'message' => 'No data']);
         }
 
         Log::info('Saving events:', ['count' => count($data)]);
 
         Event::truncate();
-        
+
         foreach ($data as $event) {
             $date = $event['date'] ?? now()->toDateString();
             try {
@@ -115,33 +130,34 @@ class EditorController extends Controller
                 $parsedDate = now()->toDateString();
                 Log::warning('Invalid date format, using today:', ['original' => $date]);
             }
-            
+
             Event::create([
                 'title' => $event['title'] ?? 'Untitled Event',
                 'date' => $parsedDate,
                 'time' => $event['time'] ?? '',
                 'location' => $event['location'] ?? '',
-                'type' => $event['type'] ?? 'event'
+                'type' => $event['type'] ?? 'event',
             ]);
-            
+
             Log::info('Event created:', [
                 'title' => $event['title'] ?? 'Untitled Event',
                 'date' => $parsedDate,
                 'time' => $event['time'] ?? '',
                 'location' => $event['location'] ?? '',
-                'type' => $event['type'] ?? 'event'
+                'type' => $event['type'] ?? 'event',
             ]);
         }
 
         $savedEvents = Event::orderBy('date')->get();
 
         DashboardController::clearCache();
+
         return response()->json([
             'success' => true,
-            'events' => $savedEvents
+            'events' => $savedEvents,
         ]);
     }
-    
+
     public function savePayments(Request $request)
     {
         // Accept 'periods', 'payments', or a root-level array
@@ -150,7 +166,7 @@ class EditorController extends Controller
             ?? $request->all();
 
         // If root-level is an indexed array, use it directly
-        if (!is_array($data) || empty($data)) {
+        if (! is_array($data) || empty($data)) {
             return response()->json(['success' => true, 'message' => 'No data']);
         }
 
@@ -167,26 +183,32 @@ class EditorController extends Controller
         PaymentPeriod::query()->delete();
 
         foreach ($data as $index => $periodData) {
-            if (!is_array($periodData)) continue;
+            if (! is_array($periodData)) {
+                continue;
+            }
 
             $year = isset($periodData['year']) ? (int) $periodData['year'] : (int) date('Y');
-            if ($year < 2000 || $year > 2100) $year = (int) date('Y');
+            if ($year < 2000 || $year > 2100) {
+                $year = (int) date('Y');
+            }
 
             $period = PaymentPeriod::create([
-                'from_month'    => $periodData['from_month'] ?? 'January',
-                'to_month'      => $periodData['to_month']   ?? 'February',
-                'year'          => $year,
-                'open'          => $periodData['open'] ?? true,
+                'from_month' => $periodData['from_month'] ?? 'January',
+                'to_month' => $periodData['to_month'] ?? 'February',
+                'year' => $year,
+                'open' => $periodData['open'] ?? true,
                 'display_order' => $index,
             ]);
 
             $items = $periodData['items'] ?? [];
             if (is_array($items)) {
                 foreach ($items as $itemIndex => $item) {
-                    if (!is_array($item)) continue;
+                    if (! is_array($item)) {
+                        continue;
+                    }
                     $period->items()->create([
-                        'name'          => $item['name']   ?? 'New Service',
-                        'status'        => in_array($item['status'] ?? '', ['pending','process','paid'])
+                        'name' => $item['name'] ?? 'New Service',
+                        'status' => in_array($item['status'] ?? '', ['pending', 'process', 'paid'])
                                             ? $item['status'] : 'pending',
                         'display_order' => $itemIndex,
                     ]);
@@ -195,6 +217,7 @@ class EditorController extends Controller
         }
 
         DashboardController::clearCache();
+
         return response()->json(['success' => true]);
     }
 }

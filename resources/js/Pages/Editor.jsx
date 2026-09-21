@@ -85,6 +85,30 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
             ));
         }
     };
+
+    const addDivision = () => {
+        const divisionId = Date.now();
+
+        setDivisions(prev => [...prev, {
+            id: divisionId,
+            name: 'New Division',
+            abbr: 'NEW',
+            tasks: [],
+            display_order: prev.length,
+        }]);
+    };
+
+    const updateDivision = (divisionId, field, value) => {
+        setDivisions(prev => prev.map(division =>
+            division.id === divisionId ? { ...division, [field]: value } : division
+        ));
+    };
+
+    const deleteDivision = (divisionId) => {
+        if (confirm('Delete this division and all of its tasks?')) {
+            setDivisions(prev => prev.filter(division => division.id !== divisionId));
+        }
+    };
     
     // Urgent management
     const updateUrgent = (id, field, value) => {
@@ -187,9 +211,11 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
 
     const buildPayloads = () => {
         const formattedDivisions = divisions.map(div => ({
-            ...div,
-            tasks: div.tasks.map(task => ({
-                ...task,
+            name: div.name || 'New Division',
+            abbr: div.abbr || '',
+            tasks: (div.tasks || []).map(task => ({
+                title: task.title || 'New Task',
+                status: task.status || 'pending',
                 due_date: stripDate(task.due_date),
             })),
         }));
@@ -354,6 +380,9 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
                 {activeTab === 'tasks' && (
                     <TaskManager 
                         divisions={divisions}
+                        onAddDivision={addDivision}
+                        onUpdateDivision={updateDivision}
+                        onDeleteDivision={deleteDivision}
                         onUpdateTask={updateTask}
                         onAddTask={addTask}
                         onDeleteTask={deleteTask}

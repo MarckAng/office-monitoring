@@ -1,7 +1,7 @@
 import React from 'react';
 import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 
-export default function TaskManager({ divisions, onUpdateTask, onAddTask, onDeleteTask }) {
+export default function TaskManager({ divisions, onAddDivision, onUpdateDivision, onDeleteDivision, onUpdateTask, onAddTask, onDeleteTask }) {
     const getStatusColor = (status) => {
         const colors = {
             ongoing: 'bg-cyan-400/10 text-cyan-400 border-cyan-400/30',
@@ -47,21 +47,52 @@ export default function TaskManager({ divisions, onUpdateTask, onAddTask, onDele
     };
     
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
+            <div className="flex justify-end">
+                <button
+                    onClick={onAddDivision}
+                    className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-400/10 border border-cyan-400/30 text-cyan-400 hover:bg-cyan-400/20"
+                >
+                    <PlusIcon className="w-3 h-3 inline mr-1" /> Add Division
+                </button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {divisions.map(division => (
                 <div key={division.id} className="bg-[#0c1a28] rounded-lg border border-white/5 overflow-hidden">
                     <div className="p-3 bg-[#0f2033] border-b border-white/5">
                         <div className="flex justify-between items-center">
-                            <div>
-                                <div className="text-sm font-semibold text-white">{division.name}</div>
-                                <div className="text-xs text-gray-500">{division.abbr}</div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                                <input
+                                    type="text"
+                                    value={division.name}
+                                    onChange={(e) => onUpdateDivision(division.id, 'name', e.target.value)}
+                                    className="w-full bg-transparent text-sm font-semibold text-white focus:outline-none"
+                                    placeholder="Division name"
+                                />
+                                <input
+                                    type="text"
+                                    value={division.abbr || ''}
+                                    onChange={(e) => onUpdateDivision(division.id, 'abbr', e.target.value)}
+                                    className="w-full bg-transparent text-xs text-gray-500 focus:outline-none"
+                                    placeholder="Abbreviation"
+                                />
                             </div>
-                            <button 
-                                onClick={() => onAddTask(division.id)}
-                                className="p-1 rounded hover:bg-white/5 text-cyan-400"
-                            >
-                                <PlusIcon className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-1 ml-2">
+                                <button
+                                    onClick={() => onAddTask(division.id)}
+                                    className="p-1 rounded hover:bg-white/5 text-cyan-400"
+                                    title="Add task"
+                                >
+                                    <PlusIcon className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={() => onDeleteDivision(division.id)}
+                                    className="p-1 rounded hover:bg-red-500/10 text-red-400"
+                                    title="Delete division"
+                                >
+                                    <TrashIcon className="w-4 h-4" />
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div className="p-3 space-y-2 max-h-[500px] overflow-y-auto">
@@ -113,6 +144,10 @@ export default function TaskManager({ divisions, onUpdateTask, onAddTask, onDele
                     </div>
                 </div>
             ))}
+            </div>
+            {divisions.length === 0 && (
+                <div className="text-center text-gray-500 text-sm py-8">No divisions yet. Click "Add Division" to create one.</div>
+            )}
         </div>
     );
 }
