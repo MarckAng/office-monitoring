@@ -24,8 +24,8 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
     const [toastType, setToastType] = useState('success');
     const [selectedDate, setSelectedDate] = useState(null);
     const [viewMode, setViewMode] = useState('all');
-    const [calendarMonth, setCalendarMonth] = useState(5);
-    const [calendarYear, setCalendarYear] = useState(2026);
+    const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+    const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
     
     const slides = ['Division Task Overview', 'Urgent Tasks', 'Activities & Events', 'Payment Tracker'];
     
@@ -36,6 +36,8 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
             if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
                 return date;
             }
+            // ISO timestamp — split to avoid UTC shift
+            if (date.includes('T')) return date.split('T')[0];
             try {
                 const d = new Date(date);
                 if (!isNaN(d)) {
@@ -54,6 +56,17 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
             return `${year}-${month}-${day}`;
         }
         return String(date);
+    };
+
+    // Effective end date of an event — falls back to start_date for single-day events
+    const getEventEndDate = (event) =>
+        getDateString(event.end_date) || getDateString(event.start_date);
+
+    // Does a given date fall within the event's [start_date, end_date] range?
+    const isDateWithinEvent = (dateStr, event) => {
+        const start = getDateString(event.start_date);
+        const end = getEventEndDate(event);
+        return dateStr >= start && dateStr <= end;
     };
     
     // Toast notification
@@ -112,9 +125,13 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
     }, [currentSlide, paused]);
     
     // Copy to clipboard
-    const copyToClipboard = (text) => {
-        navigator.clipboard.writeText(text);
-        showToast(`📋 Copied: "${text}"`, 'success');
+    const copyToClipboard = async (text) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast(`Copied: "${text}"`, 'success');
+        } catch {
+            showToast('Unable to copy to the clipboard.', 'error');
+        }
     };
     
     const getEventColor = (type) => {
@@ -131,14 +148,11 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
         return colors[type] || '#4fc3f7';
     };
     
-    // Get events for a specific date
+    // Get events that fall on a specific date (checks if date is within [start, end])
     const getEventsForDate = (date) => {
         if (!date) return [];
         const dateStr = getDateString(date);
-        return events.filter(e => {
-            const eventDateStr = getDateString(e.date);
-            return eventDateStr === dateStr;
-        });
+        return events.filter(e => isDateWithinEvent(dateStr, e));
     };
     
     // Get filtered events based on selected date
@@ -187,19 +201,13 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
     const hasEventsOnDate = (date) => {
         if (!date) return false;
         const dateStr = getDateString(date);
-        return events.some(e => {
-            const eventDateStr = getDateString(e.date);
-            return eventDateStr === dateStr;
-        });
+        return events.some(e => isDateWithinEvent(dateStr, e));
     };
     
     const hasDeadlinesOnDate = (date) => {
         if (!date) return false;
         const dateStr = getDateString(date);
-        return events.some(e => {
-            const eventDateStr = getDateString(e.date);
-            return eventDateStr === dateStr && e.type === 'deadline';
-        });
+        return events.some(e => isDateWithinEvent(dateStr, e) && e.type === 'deadline');
     };
     
     const isDateSelected = (date) => {
@@ -221,6 +229,21 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
             day: 'numeric', 
             year: 'numeric' 
         });
+    };
+
+    // Format a date range: "Sep 24" for single day, "Sep 24 – Sep 26" for ranges
+    const formatDateRange = (start, end) => {
+        const s = getDateString(start);
+        const e = getDateString(end) || s;
+        if (!s) return '';
+        const [sy, sm, sd] = s.split('-').map(Number);
+        const [ey, em, ed] = e.split('-').map(Number);
+        const startDate = new Date(sy, sm - 1, sd);
+        const endDate = new Date(ey, em - 1, ed);
+        const shortStart = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        if (s === e) return shortStart;
+        const shortEnd = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return `${shortStart} – ${shortEnd}`;
     };
     
     const handleDateClick = (date) => {
@@ -245,10 +268,18 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
     
     const getNextEventCountdown = () => {
         if (!Array.isArray(events) || events.length === 0) return null;
-        const sortedEvents = [...events].sort((a, b) => new Date(a.date) - new Date(b.date));
-        const nextEvent = new Date(sortedEvents[0].date);
         const now = new Date();
-        const diff = nextEvent - now;
+        const todayStr = getDateString(now);
+
+        // Any event whose end_date >= today is still upcoming or ongoing
+        const upcoming = events
+            .filter(e => getEventEndDate(e) >= todayStr)
+            .sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
+
+        if (upcoming.length === 0) return null;
+
+        const nextStart = new Date(`${getDateString(upcoming[0].start_date)}T00:00:00`);
+        const diff = nextStart - now;
         
         if (diff <= 0) return { text: 'Today! 🎉' };
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -332,7 +363,7 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                         <p className="text-[10px] font-mono text-gray-600">
                                             {viewMode === 'day' && selectedDate 
                                                 ? formatDate(selectedDate)
-                                                : 'All Events - June 2026'
+                                                : 'All scheduled events'
                                             }
                                         </p>
                                     </div>
@@ -341,6 +372,7 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                     {viewMode === 'day' && (
                                         <button 
                                             onClick={clearDateFilter}
+                                            type="button"
                                             className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-400/10 border border-cyan-400/30 text-cyan-400 hover:bg-cyan-400/20 transition-colors"
                                         >
                                             Show All
@@ -354,25 +386,51 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                             
                             <div className="space-y-3 max-h-[500px] overflow-y-auto">
                                 {filteredEvents.map(event => {
-                                    const eventDate = new Date(event.date);
-                                    const month = eventDate.toLocaleString('default', { month: 'short' }).toUpperCase();
-                                    const day = eventDate.getDate();
+                                    // Use start_date for the big date badge
+                                    const startStr = getDateString(event.start_date);
+                                    const endStr = getEventEndDate(event);
+                                    const isRange = startStr && endStr && startStr !== endStr;
+
+                                    const [sy, sm, sd] = (startStr || '').split('-').map(Number);
+                                    const startDateObj = startStr ? new Date(sy, sm - 1, sd) : new Date();
+                                    const month = startDateObj.toLocaleString('default', { month: 'short' }).toUpperCase();
+                                    const day = startDateObj.getDate();
+
+                                    // End day for the range badge (same month shows just a number)
+                                    let endDayLabel = '';
+                                    if (isRange) {
+                                        const [ey, em, ed] = endStr.split('-').map(Number);
+                                        const endDateObj = new Date(ey, em - 1, ed);
+                                        if (em === sm && ey === sy) {
+                                            endDayLabel = `–${ed}`;
+                                        } else {
+                                            endDayLabel = `–${endDateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+                                        }
+                                    }
+
                                     const eventColor = getEventColor(event.type);
                                     return (
                                         <div key={event.id} className="flex gap-3 p-3 rounded-lg bg-[#0f2033] border border-white/5 hover:border-white/10 transition-all hover:scale-[1.01]">
-                                            <div className="text-center min-w-[60px]" style={{ color: eventColor }}>
+                                            <div className="text-center min-w-[70px]" style={{ color: eventColor }}>
                                                 <div className="text-[10px] font-mono uppercase tracking-wider">{month}</div>
-                                                <div className="text-2xl font-bold leading-tight">{day}</div>
+                                                <div className="text-2xl font-bold leading-tight">
+                                                    {day}<span className="text-base">{endDayLabel}</span>
+                                                </div>
                                             </div>
                                             <div className="flex-1">
                                                 <div className="text-sm font-medium text-white">{event.title}</div>
                                                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                                                     <span className="text-[9px] font-mono px-2 py-0.5 rounded border" style={{ background: `${eventColor}18`, color: eventColor, borderColor: `${eventColor}33` }}>{event.type}</span>
                                                     {event.time && <span className="text-[9px] font-mono text-gray-500">🕐 {event.time}</span>}
+                                                    {isRange && (
+                                                        <span className="text-[9px] font-mono text-gray-500">
+                                                            📆 {formatDateRange(event.start_date, event.end_date)}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {event.location && <div className="text-[10px] text-gray-600 mt-1 flex items-center gap-1"><span>📍</span> {event.location}</div>}
                                             </div>
-                                            <button onClick={() => copyToClipboard(event.title)} className="text-gray-600 hover:text-cyan-400 transition-colors text-xs" title="Copy event name">📋</button>
+                                            <button aria-label={`Copy ${event.title}`} className="text-gray-600 hover:text-cyan-400 transition-colors text-xs" onClick={() => copyToClipboard(event.title)} title="Copy event name" type="button">📋</button>
                                         </div>
                                     );
                                 })}
@@ -389,7 +447,9 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                             <div className="flex justify-between items-center mb-4">
                                 <button 
                                     onClick={() => changeMonth(-1)}
+                                    aria-label="Show previous month"
                                     className="p-2 rounded hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
+                                    type="button"
                                 >
                                     ◀
                                 </button>
@@ -398,7 +458,9 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                 </div>
                                 <button 
                                     onClick={() => changeMonth(1)}
+                                    aria-label="Show next month"
                                     className="p-2 rounded hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
+                                    type="button"
                                 >
                                     ▶
                                 </button>
@@ -447,10 +509,12 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                     }
                                     
                                     return (
-                                        <div 
+                                        <button
+                                            aria-label={`${date.toLocaleDateString('en-US')}${hasEvents ? `, ${getEventsForDate(date).length} events` : ''}`}
                                             key={date.toISOString()}
                                             onClick={() => handleDateClick(date)}
                                             className={`aspect-square rounded-lg flex flex-col items-center justify-center p-1 ${bgClass} ${hoverClass}`}
+                                            type="button"
                                         >
                                             <span className={textClass}>{date.getDate()}</span>
                                             {hasEvents && (
@@ -468,7 +532,7 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                                     )}
                                                 </div>
                                             )}
-                                        </div>
+                                        </button>
                                     );
                                 })}
                             </div>
@@ -500,6 +564,7 @@ export default function Dashboard({ divisions, urgent, events, payments }) {
                                         </div>
                                         <button 
                                             onClick={clearDateFilter}
+                                            type="button"
                                             className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
                                         >
                                             Show All

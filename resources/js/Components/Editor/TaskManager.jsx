@@ -4,9 +4,10 @@ import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 export default function TaskManager({ divisions, onAddDivision, onUpdateDivision, onDeleteDivision, onUpdateTask, onAddTask, onDeleteTask }) {
     const getStatusColor = (status) => {
         const colors = {
-            ongoing: 'bg-cyan-400/10 text-cyan-400 border-cyan-400/30',
-            pending: 'bg-yellow-400/10 text-yellow-400 border-yellow-400/30',
-            done: 'bg-green-400/10 text-green-400 border-green-400/30'
+            ongoing:  'bg-cyan-400/10 text-cyan-400 border-cyan-400/30',
+            pending:  'bg-yellow-400/10 text-yellow-400 border-yellow-400/30',
+            'on-hold': 'bg-orange-400/10 text-orange-400 border-orange-400/30',
+            done:     'bg-green-400/10 text-green-400 border-green-400/30',
         };
         return colors[status] || colors.pending;
     };
@@ -113,6 +114,7 @@ export default function TaskManager({ divisions, onAddDivision, onUpdateDivision
                                     >
                                         <option value="ongoing">Ongoing</option>
                                         <option value="pending">Pending</option>
+                                        <option value="on-hold">On Hold</option>
                                         <option value="done">Done</option>
                                     </select>
                                     <button 

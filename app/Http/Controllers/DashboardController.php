@@ -31,16 +31,23 @@ class DashboardController extends Controller
 
                 'urgent' => UrgentItem::orderBy('display_order')->get(),
 
-                'events' => Event::orderBy('date')
+                'events' => Event::orderBy('start_date')
                     ->get()
                     ->map(function ($event) {
                         // Normalise to yyyy-MM-dd so the frontend date logic
                         // never gets bitten by ISO timestamps or timezones.
-                        $event->date = $event->date instanceof \DateTime
-                            ? $event->date->format('Y-m-d')
-                            : (is_string($event->date)
-                                ? substr($event->date, 0, 10)
-                                : $event->date);
+                        $event->start_date = $event->start_date instanceof \DateTime
+                            ? $event->start_date->format('Y-m-d')
+                            : (is_string($event->start_date)
+                                ? substr($event->start_date, 0, 10)
+                                : $event->start_date);
+
+                        $event->end_date = $event->end_date instanceof \DateTime
+                            ? $event->end_date->format('Y-m-d')
+                            : (is_string($event->end_date)
+                                ? substr($event->end_date, 0, 10)
+                                : $event->end_date);
+
                         return $event;
                     }),
 

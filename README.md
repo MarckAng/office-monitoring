@@ -1,58 +1,124 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Office Monitoring System
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A dashboard and editor for tracking office division tasks, urgent work, events, and payment periods. The dashboard presents the current information in a slide-based display, while the editor provides a single place to maintain it.
 
-## About Laravel
+## Features
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Division task tracking with statuses and due dates
+- Add, edit, and delete divisions and their tasks
+- Urgent-item tracking with priority and due information
+- Event calendar and activity management
+- Payment-period and payment-item tracking
+- Dashboard data caching, refreshed after editor changes are saved
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Technology
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- PHP 8.3+
+- Laravel 13
+- Inertia.js 3 with React 19
+- Tailwind CSS 4 and Vite
+- SQLite by default; MySQL is also supported through Laravel configuration
 
-## Learning Laravel
+## Requirements
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- PHP 8.3 or newer with the extensions required by Laravel
+- Composer
+- Node.js 20+ and npm
+- A supported database (SQLite or MySQL)
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Setup
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+1. Install the PHP dependencies:
 
-## Agentic Development
+   ```bash
+   composer install
+   ```
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+2. Create your environment file and application key:
+
+   ```bash
+   cp .env.example .env
+   php artisan key:generate
+   ```
+
+   On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`.
+
+3. Configure the database in `.env`.
+
+   For SQLite, create the database file if it does not exist and keep `DB_CONNECTION=sqlite`:
+
+   ```powershell
+   New-Item -ItemType File -Path database/database.sqlite -Force
+   ```
+
+   For MySQL, set `DB_CONNECTION=mysql` and provide `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD`.
+
+4. Run the database migrations:
+
+   ```bash
+   php artisan migrate
+   ```
+
+5. Install frontend dependencies:
+
+   ```bash
+   npm install
+   ```
+
+## Run locally
+
+Start the Laravel server and Vite development server in separate terminals:
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+php artisan serve
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+```bash
+npm run dev
+```
 
-## Contributing
+Then open `http://localhost:8000`.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+For a production asset build, run:
 
-## Code of Conduct
+```bash
+npm run build
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Using the application
 
-## Security Vulnerabilities
+| Page | Path | Purpose |
+| --- | --- | --- |
+| Dashboard | `/` | View division tasks, urgent items, events, and payments. |
+| Task Editor | `/editor` | Create, edit, or delete all tracked information. |
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+In the editor, use **Add Division** to create a division, use the plus icon on a division to add tasks, and use the trash icons to remove tasks or divisions. Select **Save All** to persist changes.
+
+## Tests and formatting
+
+Run the test suite:
+
+```bash
+php artisan test
+```
+
+Format PHP files with Laravel Pint:
+
+```bash
+vendor/bin/pint --dirty --format agent
+```
+
+## Project structure
+
+```text
+app/Http/Controllers/    Dashboard and editor request handling
+app/Models/              Division, task, event, urgent-item, and payment models
+database/migrations/     Application schema
+resources/js/Pages/      Inertia page components
+resources/js/Components/ Dashboard and editor UI components
+routes/web.php           Application and editor API routes
+```
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+This project is licensed under the MIT License.

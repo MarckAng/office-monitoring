@@ -9,7 +9,8 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
     const [editingEvent, setEditingEvent] = useState(null);
     const [formData, setFormData] = useState({
         title: '',
-        date: new Date().toISOString().split('T')[0],
+        start_date: new Date().toISOString().split('T')[0],
+        end_date: new Date().toISOString().split('T')[0],
         time: '',
         location: '',
         type: 'event'
@@ -29,22 +30,17 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
     useEffect(() => {
         if (initialEvents) {
             setEvents(initialEvents);
-            console.log('📅 Events loaded:', initialEvents);
         }
     }, [initialEvents]);
 
     // Helper: Get date string in YYYY-MM-DD format without timezone issues
     const getDateString = (date) => {
         if (!date) return '';
-        // String: strip timestamp if present (avoids UTC timezone shift)
         if (typeof date === 'string') {
-            // Already yyyy-MM-dd
             if (/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
-            // Has T — e.g. "2026-06-25T00:00:00Z" — just split, don't use new Date()
             if (date.includes('T')) return date.split('T')[0];
             return date;
         }
-        // Date object — use LOCAL date parts (not UTC) to avoid timezone shift
         if (date instanceof Date) {
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -54,42 +50,29 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
         return String(date);
     };
 
-    // Get events for a specific date - using local date to avoid timezone issues
+    // Effective end date — falls back to start_date if empty
+    const getEventEndDate = (event) =>
+        getDateString(event.end_date) || getDateString(event.start_date);
+
+    // Events on a specific date (checks if the date falls within [start, end])
     const getEventsForDate = (date) => {
         if (!date) return [];
         const dateStr = getDateString(date);
-        console.log('🔍 Looking for events on:', dateStr);
-        
-        const filtered = events.filter(event => {
-            const eventDateStr = getDateString(event.date);
-            const match = eventDateStr === dateStr;
-            if (match) {
-                console.log('✅ Found event:', event.title, 'on', eventDateStr);
-            }
-            return match;
+        return events.filter(event => {
+            const start = getDateString(event.start_date);
+            const end = getEventEndDate(event);
+            return dateStr >= start && dateStr <= end;
         });
-        
-        console.log(`📅 Found ${filtered.length} events on ${dateStr}`);
-        return filtered;
     };
 
-    // Check if a date has events
     const dateHasEvents = (date) => {
         if (!date) return false;
-        const dateStr = getDateString(date);
-        return events.some(event => {
-            const eventDateStr = getDateString(event.date);
-            return eventDateStr === dateStr;
-        });
+        return getEventsForDate(date).length > 0;
     };
 
     const dateHasDeadlines = (date) => {
         if (!date) return false;
-        const dateStr = getDateString(date);
-        return events.some(event => {
-            const eventDateStr = getDateString(event.date);
-            return eventDateStr === dateStr && event.type === 'deadline';
-        });
+        return getEventsForDate(date).some(e => e.type === 'deadline');
     };
 
     const changeMonth = (delta) => {
@@ -105,9 +88,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
         const lastDay = new Date(year, month + 1, 0);
         const days = [];
         const startDay = firstDay.getDay();
-        for (let i = 0; i < startDay; i++) {
-            days.push(null);
-        }
+        for (let i = 0; i < startDay; i++) days.push(null);
         for (let i = 1; i <= lastDay.getDate(); i++) {
             days.push(new Date(year, month, i));
         }
@@ -117,7 +98,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
     const daysInMonth = getDaysInMonth(currentMonth);
 
     const handleEventChange = (id, field, value) => {
-        const updatedEvents = events.map(event => 
+        const updatedEvents = events.map(event =>
             event.id === id ? { ...event, [field]: value } : event
         );
         setEvents(updatedEvents);
@@ -126,10 +107,12 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
 
     const addEvent = () => {
         const defaultDate = selectedDate || new Date();
+        const dateStr = getDateString(defaultDate);
         setEditingEvent(null);
         setFormData({
             title: '',
-            date: getDateString(defaultDate),
+            start_date: dateStr,
+            end_date: dateStr,
             time: '',
             location: '',
             type: 'event'
@@ -141,7 +124,8 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
         setEditingEvent(event);
         setFormData({
             title: event.title,
-            date: getDateString(event.date),
+            start_date: getDateString(event.start_date),
+            end_date: getDateString(event.end_date) || getDateString(event.start_date),
             time: event.time || '',
             location: event.location || '',
             type: event.type
@@ -161,41 +145,39 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
     };
 
     const saveEvent = () => {
-        let eventDate = formData.date || new Date().toISOString().split('T')[0];
-        
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) {
-            const d = new Date(eventDate);
-            if (!isNaN(d)) {
-                eventDate = d.toISOString().split('T')[0];
-            }
-        }
-        
+        const normalize = (d) => {
+            if (!d) return '';
+            if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+            const parsed = new Date(d);
+            return isNaN(parsed) ? '' : parsed.toISOString().split('T')[0];
+        };
+
+        let start = normalize(formData.start_date) || new Date().toISOString().split('T')[0];
+        let end = normalize(formData.end_date) || start;
+        if (end < start) end = start;
+
         const eventData = {
             title: formData.title ? formData.title.trim() : 'Untitled Event',
-            date: eventDate, 
+            start_date: start,
+            end_date: end,
             time: formData.time || '',
             location: formData.location || '',
             type: formData.type || 'event'
         };
 
-        console.log('💾 Saving event with date:', eventDate);
-
         if (editingEvent) {
-            const updatedEvents = events.map(event => 
+            const updatedEvents = events.map(event =>
                 event.id === editingEvent.id ? { ...event, ...eventData } : event
             );
             setEvents(updatedEvents);
             onEventsChange(updatedEvents);
         } else {
-            const newEvent = { 
-                ...eventData,
-                id: Date.now()
-            };
+            const newEvent = { ...eventData, id: Date.now() };
             const updatedEvents = [...events, newEvent];
             setEvents(updatedEvents);
             onEventsChange(updatedEvents);
         }
-        
+
         setShowForm(false);
         setEditingEvent(null);
     };
@@ -216,12 +198,6 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
 
     const handleDateClick = (date) => {
         if (!date) return;
-        const dateStr = getDateString(date);
-        console.log('📅 Date clicked:', dateStr);
-        
-        const eventsOnDate = getEventsForDate(date);
-        console.log(`📅 Found ${eventsOnDate.length} events on ${dateStr}:`, eventsOnDate.map(e => e.title));
-        
         setSelectedDate(prev =>
             prev &&
             prev.getDate() === date.getDate() &&
@@ -232,22 +208,20 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
         );
     };
 
-    const clearDateFilter = () => {
-        setSelectedDate(null);
-    };
+    const clearDateFilter = () => setSelectedDate(null);
 
     const isToday = (date) => {
         if (!date) return false;
         const today = new Date();
-        return date.getDate() === today.getDate() && 
-               date.getMonth() === today.getMonth() && 
+        return date.getDate() === today.getDate() &&
+               date.getMonth() === today.getMonth() &&
                date.getFullYear() === today.getFullYear();
     };
 
     const isDateSelected = (date) => {
         if (!selectedDate || !date) return false;
-        return date.getDate() === selectedDate.getDate() && 
-               date.getMonth() === selectedDate.getMonth() && 
+        return date.getDate() === selectedDate.getDate() &&
+               date.getMonth() === selectedDate.getMonth() &&
                date.getFullYear() === selectedDate.getFullYear();
     };
 
@@ -261,23 +235,16 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
     const formatDate = (dateStr) => {
         if (!dateStr) return '';
         try {
-            // If it's already in YYYY-MM-DD format, parse it locally
             if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
                 const parts = dateStr.split('-');
                 const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
                 if (!isNaN(d)) {
-                    return d.toLocaleDateString('en-US', { 
-                        month: 'short', 
-                        day: 'numeric'
-                    });
+                    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 }
             }
             const d = new Date(dateStr);
             if (!isNaN(d)) {
-                return d.toLocaleDateString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric'
-                });
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             }
             return dateStr;
         } catch (e) {
@@ -285,15 +252,19 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
         }
     };
 
-    const getMonthYear = () => {
-        return currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
+    // "Sep 24" or "Sep 24 – Sep 26" for ranges
+    const formatDateRange = (start, end) => {
+        const s = formatDate(start);
+        const e = formatDate(end);
+        if (!e || s === e) return s;
+        return `${s} – ${e}`;
     };
 
-    // Get filtered events based on selected date
-    const getFilteredEvents = () => {
-        if (!selectedDate) return events;
-        return getEventsForDate(selectedDate);
-    };
+    const getMonthYear = () =>
+        currentMonth.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    const getFilteredEvents = () =>
+        selectedDate ? getEventsForDate(selectedDate) : events;
 
     const filteredEvents = getFilteredEvents();
 
@@ -315,7 +286,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
             {/* Event Form Modal */}
             {showForm && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-[#0c1a28] rounded-lg border border-white/10 p-6 w-96 max-w-full">
+                    <div className="bg-[#0c1a28] rounded-lg border border-white/10 p-6 w-[420px] max-w-full">
                         <h3 className="text-lg font-semibold text-white mb-4">
                             {editingEvent ? 'Edit Event' : 'New Event'}
                         </h3>
@@ -327,12 +298,37 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                                 placeholder="Event title"
                                 className="w-full bg-[#0f2033] px-3 py-2 rounded text-sm text-white border border-white/5 focus:outline-none focus:border-blue-400"
                             />
-                            <input
-                                type="date"
-                                value={formData.date}
-                                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                                className="w-full bg-[#0f2033] px-3 py-2 rounded text-sm text-white border border-white/5 focus:outline-none focus:border-blue-400"
-                            />
+
+                            {/* Start + End date side by side */}
+                            <div className="flex gap-2">
+                                <div className="flex-1">
+                                    <label className="text-[10px] text-gray-500 block mb-1">Start Date</label>
+                                    <input
+                                        type="date"
+                                        value={formData.start_date}
+                                        onChange={(e) => {
+                                            const newStart = e.target.value;
+                                            setFormData(prev => ({
+                                                ...prev,
+                                                start_date: newStart,
+                                                end_date: prev.end_date < newStart ? newStart : prev.end_date,
+                                            }));
+                                        }}
+                                        className="w-full bg-[#0f2033] px-3 py-2 rounded text-sm text-white border border-white/5 focus:outline-none focus:border-blue-400"
+                                    />
+                                </div>
+                                <div className="flex-1">
+                                    <label className="text-[10px] text-gray-500 block mb-1">End Date</label>
+                                    <input
+                                        type="date"
+                                        value={formData.end_date}
+                                        min={formData.start_date}
+                                        onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                                        className="w-full bg-[#0f2033] px-3 py-2 rounded text-sm text-white border border-white/5 focus:outline-none focus:border-blue-400"
+                                    />
+                                </div>
+                            </div>
+
                             <input
                                 type="text"
                                 value={formData.time}
@@ -357,14 +353,14 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                                 ))}
                             </select>
                             <div className="flex gap-2 pt-2">
-                                <button 
-                                    onClick={() => setShowForm(false)} 
+                                <button
+                                    onClick={() => setShowForm(false)}
                                     className="flex-1 px-3 py-2 rounded text-xs bg-gray-500/10 text-gray-400 hover:bg-gray-500/20"
                                 >
                                     Cancel
                                 </button>
-                                <button 
-                                    onClick={saveEvent} 
+                                <button
+                                    onClick={saveEvent}
                                     className="flex-1 px-3 py-2 rounded text-xs bg-blue-400/20 text-blue-400 hover:bg-blue-400/30"
                                 >
                                     Save
@@ -380,7 +376,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                 {/* Calendar */}
                 <div className="lg:col-span-1 bg-[#0c1a28] rounded-lg border border-white/5 p-3">
                     <div className="flex justify-between items-center mb-2">
-                        <button 
+                        <button
                             onClick={() => changeMonth(-1)}
                             className="p-1 rounded hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
                         >
@@ -389,35 +385,35 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                         <div className="text-sm font-semibold text-white">
                             {getMonthYear()}
                         </div>
-                        <button 
+                        <button
                             onClick={() => changeMonth(1)}
                             className="p-1 rounded hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
                         >
                             <ChevronRightIcon className="w-4 h-4" />
                         </button>
                     </div>
-                    
+
                     <div className="grid grid-cols-7 gap-0.5">
                         {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
                             <div key={day} className="text-center text-[9px] font-mono text-gray-500 py-0.5">
                                 {day}
                             </div>
                         ))}
-                        
+
                         {daysInMonth.map((date, index) => {
                             if (!date) {
                                 return <div key={`empty-${index}`} className="aspect-square rounded"></div>;
                             }
-                            
+
                             const hasEvents = dateHasEvents(date);
                             const hasDeadlines = dateHasDeadlines(date);
                             const isSelected = isDateSelected(date);
                             const today = isToday(date);
                             const isPast = isDateInPast(date);
-                            
+
                             let bgClass = "aspect-square rounded flex flex-col items-center justify-center transition-all cursor-pointer hover:scale-105";
                             let textClass = "text-xs font-medium";
-                            
+
                             if (isSelected) {
                                 bgClass += " bg-cyan-400/30 ring-1 ring-cyan-400/50 hover:bg-cyan-400/40";
                                 textClass = "text-cyan-400 font-bold text-xs";
@@ -437,9 +433,9 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                                 bgClass += " hover:bg-white/5";
                                 textClass = "text-gray-500 text-xs";
                             }
-                            
+
                             return (
-                                <div 
+                                <div
                                     key={date.toISOString()}
                                     onClick={() => handleDateClick(date)}
                                     className={bgClass}
@@ -448,7 +444,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                                     {hasEvents && (
                                         <div className="flex gap-0.5 mt-0.5">
                                             {getEventsForDate(date).slice(0, 2).map((e, idx) => (
-                                                <div 
+                                                <div
                                                     key={idx}
                                                     className="w-1 h-1 rounded-full"
                                                     style={{ backgroundColor: getEventColor(e.type) }}
@@ -464,7 +460,7 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                             );
                         })}
                     </div>
-                    
+
                     <div className="flex justify-center gap-3 mt-3 pt-2 border-t border-white/5 flex-wrap">
                         <div className="flex items-center gap-1">
                             <div className="w-2 h-2 rounded-full bg-cyan-400"></div>
@@ -489,13 +485,13 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                 <div className="lg:col-span-2 bg-[#0c1a28] rounded-lg border border-white/5 p-3">
                     <div className="flex items-center justify-between mb-3">
                         <div className="text-sm font-medium text-white">
-                            {selectedDate 
+                            {selectedDate
                                 ? `📅 ${selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
                                 : '📋 All Events'
                             }
                         </div>
                         {selectedDate && (
-                            <button 
+                            <button
                                 onClick={clearDateFilter}
                                 className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
                             >
@@ -505,52 +501,50 @@ export default function EventsManager({ events: initialEvents, onEventsChange })
                     </div>
 
                     <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
-                        {(selectedDate ? filteredEvents : events).map(event => {
-                            return (
-                                <div key={event.id} className="flex items-center gap-2 p-2 bg-[#0f2033] rounded-lg hover:bg-[#122a3f] transition-colors group">
-                                    <div 
-                                        className="w-1.5 h-1.5 rounded-full flex-shrink-0" 
-                                        style={{ backgroundColor: getEventColor(event.type) }}
-                                    />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm text-white truncate">{event.title}</div>
-                                        <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                                            <span>{formatDate(event.date)}</span>
-                                            {event.time && <span>• {event.time}</span>}
-                                            {event.location && <span>• {event.location}</span>}
-                                            <span 
-                                                className="text-[9px] px-1.5 py-0.5 rounded border"
-                                                style={{ 
-                                                    background: `${getEventColor(event.type)}18`,
-                                                    color: getEventColor(event.type),
-                                                    borderColor: `${getEventColor(event.type)}33`
-                                                }}
-                                            >
-                                                {event.type}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <button 
-                                            onClick={() => editEvent(event)}
-                                            className="p-1 rounded hover:bg-blue-500/10 text-blue-400"
+                        {(selectedDate ? filteredEvents : events).map(event => (
+                            <div key={event.id} className="flex items-center gap-2 p-2 bg-[#0f2033] rounded-lg hover:bg-[#122a3f] transition-colors group">
+                                <div
+                                    className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                                    style={{ backgroundColor: getEventColor(event.type) }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-sm text-white truncate">{event.title}</div>
+                                    <div className="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                                        <span>{formatDateRange(event.start_date, event.end_date)}</span>
+                                        {event.time && <span>• {event.time}</span>}
+                                        {event.location && <span>• {event.location}</span>}
+                                        <span
+                                            className="text-[9px] px-1.5 py-0.5 rounded border"
+                                            style={{
+                                                background: `${getEventColor(event.type)}18`,
+                                                color: getEventColor(event.type),
+                                                borderColor: `${getEventColor(event.type)}33`
+                                            }}
                                         >
-                                            ✏️
-                                        </button>
-                                        <button 
-                                            onClick={() => deleteEvent(event.id)}
-                                            className="p-1 rounded hover:bg-red-500/10 text-red-400"
-                                        >
-                                            <TrashIcon className="w-3 h-3" />
-                                        </button>
+                                            {event.type}
+                                        </span>
                                     </div>
                                 </div>
-                            );
-                        })}
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button
+                                        onClick={() => editEvent(event)}
+                                        className="p-1 rounded hover:bg-blue-500/10 text-blue-400"
+                                    >
+                                        ✏️
+                                    </button>
+                                    <button
+                                        onClick={() => deleteEvent(event.id)}
+                                        className="p-1 rounded hover:bg-red-500/10 text-red-400"
+                                    >
+                                        <TrashIcon className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
                         {(selectedDate ? filteredEvents : events).length === 0 && (
                             <div className="text-center text-gray-500 text-sm py-8">
-                                {selectedDate 
-                                    ? 'No events on this day. Click "Add Event" to create one.' 
+                                {selectedDate
+                                    ? 'No events on this day. Click "Add Event" to create one.'
                                     : 'No events. Click "Add Event" to create one.'
                                 }
                             </div>

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from '@inertiajs/react';
 import EventsManager from '../Components/Editor/EventsManager';
 import TaskManager from '../Components/Editor/TaskManager';
 import { 
@@ -19,20 +20,26 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
         }))
     }));
 
-    const [divisions, setDivisions] = useState(normalizeDivisions(initialDivisions));
-    const [urgent, setUrgent] = useState(initialUrgent || []);
     // Strip ISO timestamps on load so date inputs work correctly
     const normalizeEvents = (evs) => (evs || []).map(e => ({
         ...e,
-        date: e.date ? (e.date.includes('T') ? e.date.split('T')[0] : e.date) : ''
+        start_date: e.start_date
+            ? (String(e.start_date).includes('T') ? String(e.start_date).split('T')[0] : e.start_date)
+            : '',
+        end_date: e.end_date
+            ? (String(e.end_date).includes('T') ? String(e.end_date).split('T')[0] : e.end_date)
+            : ''
     }));
 
+    const [divisions, setDivisions] = useState(normalizeDivisions(initialDivisions));
+    const [urgent, setUrgent] = useState(initialUrgent || []);
     const [events, setEvents] = useState(normalizeEvents(initialEvents));
     const [payments, setPayments] = useState(initialPayments || []);
     const [activeTab, setActiveTab] = useState('tasks');
     const [expandedPeriods, setExpandedPeriods] = useState({});
     const [saving, setSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState('');
+    const [savedSnapshot, setSavedSnapshot] = useState('');
     
     const months = [
         'January', 'February', 'March', 'April', 'May', 'June',
@@ -155,7 +162,7 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
             id: Date.now(),
             from_month: 'January',
             to_month: 'February',
-            year: new Date().getFullYear(), // This returns a number like 2026
+            year: new Date().getFullYear(),
             open: true,
             items: [],
             display_order: payments.length
@@ -209,7 +216,7 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
     // Strip ISO timestamps to yyyy-MM-dd
     const stripDate = (d) => (d ? String(d).split('T')[0] : null);
 
-    const buildPayloads = () => {
+    const buildPayload = () => {
         const formattedDivisions = divisions.map(div => ({
             name: div.name || 'New Division',
             abbr: div.abbr || '',
@@ -224,13 +231,11 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
             let year = parseInt(period.year, 10);
             if (isNaN(year)) year = new Date().getFullYear();
             return {
-                id: period.id,
                 from_month: period.from_month || 'January',
                 to_month: period.to_month || 'February',
                 year,
                 open: period.open !== undefined ? period.open : true,
                 items: (period.items || []).map(item => ({
-                    id: item.id,
                     name: item.name || 'New Service',
                     status: item.status || 'pending',
                 })),
@@ -238,13 +243,53 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
         });
 
         const today = new Date().toISOString().split('T')[0];
-        const formattedEvents = (events || []).map(event => ({
-            ...event,
-            date: event.date ? String(event.date).split('T')[0] : today,
+        const formattedEvents = (events || []).map(event => {
+            const start = event.start_date ? String(event.start_date).split('T')[0] : today;
+            const end = event.end_date ? String(event.end_date).split('T')[0] : start;
+            return {
+                title: event.title || 'Untitled Event',
+                start_date: start,
+                end_date: end < start ? start : end,   // guarantees end >= start
+                time: event.time || '',
+                location: event.location || '',
+                type: event.type || 'event',
+            };
+        });
+
+        const formattedUrgent = urgent.map(item => ({
+            title: item.title || 'New Urgent Task',
+            division: item.division || '',
+            priority: item.priority || 'medium',
+            due: item.due || '',
         }));
 
-        return { formattedDivisions, formattedPayments, formattedEvents };
+        return {
+            divisions: formattedDivisions,
+            urgent: formattedUrgent,
+            events: formattedEvents,
+            payments: formattedPayments,
+        };
     };
+
+    const payload = useMemo(() => buildPayload(), [divisions, urgent, events, payments]);
+    const serializedPayload = JSON.stringify(payload);
+    const hasUnsavedChanges = savedSnapshot !== '' && savedSnapshot !== serializedPayload;
+
+    useEffect(() => {
+        setSavedSnapshot(serializedPayload);
+    }, []);
+
+    useEffect(() => {
+        const warnBeforeUnload = (event) => {
+            if (!hasUnsavedChanges) return;
+            event.preventDefault();
+            event.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', warnBeforeUnload);
+
+        return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+    }, [hasUnsavedChanges]);
 
     // POST JSON with Laravel's CSRF token included (reads it from the page meta tag)
     const postJson = async (url, payload, label) => {
@@ -277,18 +322,11 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
         setSaving(true);
         setSaveMessage('');
 
-        const { formattedDivisions, formattedPayments, formattedEvents } = buildPayloads();
-
-        console.log('📤 Sending divisions:', formattedDivisions);
-        console.log('📤 Sending urgent:', urgent);
-        console.log('📤 Sending events:', formattedEvents);
-        console.log('📤 Sending payments:', formattedPayments);
+        const dashboardPayload = payload;
 
         try {
-            await postJson('/api/tasks',    { divisions: formattedDivisions }, 'Tasks');
-            await postJson('/api/urgent',   { urgent },                       'Urgent');
-            await postJson('/api/events',   { events: formattedEvents },     'Events');
-            await postJson('/api/payments', { payments: formattedPayments }, 'Payments');
+            await postJson('/editor/dashboard', dashboardPayload, 'Dashboard');
+            setSavedSnapshot(JSON.stringify(dashboardPayload));
 
             setSaveMessage('✅ All changes saved successfully!');
         } catch (error) {
@@ -311,9 +349,10 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
     
     const getPaymentStatusColor = (status) => {
         const colors = {
-            paid: 'bg-green-400/10 text-green-400 border-green-400/30',
-            process: 'bg-yellow-400/10 text-yellow-400 border-yellow-400/30',
-            pending: 'bg-red-400/10 text-red-400 border-red-400/30'
+            paid:     'bg-green-400/10 text-green-400 border-green-400/30',
+            process:  'bg-yellow-400/10 text-yellow-400 border-yellow-400/30',
+            'on-hold': 'bg-orange-400/10 text-orange-400 border-orange-400/30',
+            pending:  'bg-red-400/10 text-red-400 border-red-400/30',
         };
         return colors[status] || colors.pending;
     };
@@ -336,9 +375,8 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
-                        <a href="/" className="px-3 py-1.5 rounded text-xs font-mono border border-white/10 text-gray-400 hover:border-cyan-400 hover:text-cyan-400">
-                            ← Dashboard
-                        </a>
+                        <Link className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-gray-400 hover:border-cyan-400 hover:text-cyan-400" href="/">Dashboard</Link>
+                        <Link as="button" className="rounded border border-white/10 px-3 py-1.5 text-xs font-mono text-gray-400 hover:border-cyan-400 hover:text-cyan-400" href="/logout" method="post" type="button">Sign out</Link>
                         <button 
                             onClick={saveAll}
                             disabled={saving}
@@ -354,17 +392,21 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
             <div className="pt-16 px-6 pb-6">
                 {/* Save Message */}
                 {saveMessage && (
-                    <div className="fixed bottom-4 right-4 px-4 py-2 rounded-lg bg-gray-800 border border-white/10 text-sm z-50">
+                    <div aria-live="polite" className="fixed bottom-4 right-4 rounded-lg border border-white/10 bg-gray-800 px-4 py-2 text-sm z-50" role="status">
                         {saveMessage}
                     </div>
                 )}
                 
+                {hasUnsavedChanges && <p className="mb-4 text-xs text-amber-300">You have unsaved changes.</p>}
+
                 {/* Tabs */}
                 <div className="flex gap-2 border-b border-white/10 mb-6">
                     {tabs.map(tab => (
                         <button
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
+                            aria-selected={activeTab === tab.id}
+                            role="tab"
                             className={`px-4 py-2 text-sm font-mono transition-all ${
                                 activeTab === tab.id 
                                     ? 'text-cyan-400 border-b-2 border-cyan-400' 
@@ -455,12 +497,13 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
                     <EventsManager 
                         events={events} 
                         onEventsChange={(updated) => {
-                                const normalized = (updated || []).map(e => ({
-                                    ...e,
-                                    date: e.date ? String(e.date).split('T')[0] : ''
-                                }));
-                                setEvents(normalized);
-                            }} 
+                            const normalized = (updated || []).map(e => ({
+                                ...e,
+                                start_date: e.start_date ? String(e.start_date).split('T')[0] : '',
+                                end_date: e.end_date ? String(e.end_date).split('T')[0] : ''
+                            }));
+                            setEvents(normalized);
+                        }} 
                     />
                 )}
                 
@@ -564,6 +607,7 @@ export default function Editor({ divisions: initialDivisions, urgent: initialUrg
                                                         >
                                                             <option value="pending">Pending</option>
                                                             <option value="process">Process</option>
+                                                            <option value="on-hold">On Hold</option>
                                                             <option value="paid">Paid</option>
                                                         </select>
                                                         <button 

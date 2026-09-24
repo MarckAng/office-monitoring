@@ -2,31 +2,38 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\SaveDashboardRequest;
 use App\Models\Division;
 use App\Models\Event;
 use App\Models\PaymentItem;
 use App\Models\PaymentPeriod;
 use App\Models\UrgentItem;
 use Carbon\Carbon;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class EditorController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $divisions = Division::with('tasks')->orderBy('display_order')->get();
         $urgent = UrgentItem::orderBy('display_order')->get();
-        $events = Event::orderBy('date')->get();
+        $events = Event::orderBy('start_date')->get();               // ← was 'date'
         $payments = PaymentPeriod::with('items')->orderBy('display_order')->get();
 
         // Format dates as yyyy-MM-dd strings (not ISO timestamps)
         $events->transform(function ($event) {
-            $event->date = $event->date instanceof \DateTime
-                ? $event->date->format('Y-m-d')
-                : (is_string($event->date) ? substr($event->date, 0, 10) : $event->date);
+            $event->start_date = $event->start_date instanceof \DateTime
+                ? $event->start_date->format('Y-m-d')
+                : (is_string($event->start_date) ? substr($event->start_date, 0, 10) : $event->start_date);
+
+            $event->end_date = $event->end_date instanceof \DateTime
+                ? $event->end_date->format('Y-m-d')
+                : (is_string($event->end_date) ? substr($event->end_date, 0, 10) : $event->end_date);
 
             return $event;
         });
@@ -39,22 +46,16 @@ class EditorController extends Controller
         ]);
     }
 
-    public function saveTasks(Request $request)
+    public function saveDashboard(SaveDashboardRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'divisions' => ['present', 'array'],
-            'divisions.*' => ['array:name,abbr,tasks'],
-            'divisions.*.name' => ['required', 'string', 'max:255'],
-            'divisions.*.abbr' => ['nullable', 'string', 'max:255'],
-            'divisions.*.tasks' => ['required', 'array'],
-            'divisions.*.tasks.*' => ['array:title,status,due_date'],
-            'divisions.*.tasks.*.title' => ['required', 'string', 'max:255'],
-            'divisions.*.tasks.*.status' => ['required', 'in:ongoing,pending,done'],
-            'divisions.*.tasks.*.due_date' => ['nullable', 'date'],
-        ]);
+        $validated = $request->validated();
 
         DB::transaction(function () use ($validated): void {
             Division::query()->delete();
+            UrgentItem::query()->delete();
+            Event::query()->delete();
+            PaymentItem::query()->delete();
+            PaymentPeriod::query()->delete();
 
             foreach ($validated['divisions'] as $divisionIndex => $divisionData) {
                 $division = Division::create([
@@ -72,7 +73,57 @@ class EditorController extends Controller
                     ]);
                 }
             }
-        });
+
+            foreach ($validated['urgent'] as $index => $item) {
+                UrgentItem::create([
+                    'title' => $item['title'],
+                    'division' => $item['division'] ?? '',
+                    'priority' => $item['priority'],
+                    'due' => $item['due'] ?? '',
+                    'display_order' => $index,
+                ]);
+            }
+
+            foreach ($validated['events'] as $event) {
+                $startDate = $event['start_date'] ?? $event['date'] ?? now()->toDateString();
+                $endDate = $event['end_date'] ?? $startDate;
+
+                try {
+                    $parsedStart = Carbon::parse($startDate)->toDateString();
+                    $parsedEnd = Carbon::parse($endDate)->toDateString();
+                } catch (\Exception $e) {
+                    $parsedStart = now()->toDateString();
+                    $parsedEnd = now()->toDateString();
+                }
+
+                Event::create([
+                    'title' => $event['title'],
+                    'start_date' => $parsedStart,
+                    'end_date' => $parsedEnd,
+                    'time' => $event['time'] ?? '',
+                    'location' => $event['location'] ?? '',
+                    'type' => $event['type'],
+                ]);
+            }
+
+            foreach ($validated['payments'] as $periodIndex => $periodData) {
+                $period = PaymentPeriod::create([
+                    'from_month' => $periodData['from_month'],
+                    'to_month' => $periodData['to_month'],
+                    'year' => $periodData['year'],
+                    'open' => $periodData['open'],
+                    'display_order' => $periodIndex,
+                ]);
+
+                foreach ($periodData['items'] as $itemIndex => $item) {
+                    $period->items()->create([
+                        'name' => $item['name'],
+                        'status' => $item['status'],
+                        'display_order' => $itemIndex,
+                    ]);
+                }
+            }
+        }, attempts: 3);
 
         DashboardController::clearCache();
 
@@ -123,17 +174,25 @@ class EditorController extends Controller
         Event::truncate();
 
         foreach ($data as $event) {
-            $date = $event['date'] ?? now()->toDateString();
+            $startDate = $event['start_date'] ?? $event['date'] ?? now()->toDateString();
+            $endDate = $event['end_date'] ?? $startDate;
+
             try {
-                $parsedDate = Carbon::parse($date)->toDateString();
+                $parsedStart = Carbon::parse($startDate)->toDateString();
+                $parsedEnd = Carbon::parse($endDate)->toDateString();
             } catch (\Exception $e) {
-                $parsedDate = now()->toDateString();
-                Log::warning('Invalid date format, using today:', ['original' => $date]);
+                $parsedStart = now()->toDateString();
+                $parsedEnd = now()->toDateString();
+                Log::warning('Invalid date format, using today:', [
+                    'start' => $startDate,
+                    'end' => $endDate,
+                ]);
             }
 
             Event::create([
                 'title' => $event['title'] ?? 'Untitled Event',
-                'date' => $parsedDate,
+                'start_date' => $parsedStart,
+                'end_date' => $parsedEnd,
                 'time' => $event['time'] ?? '',
                 'location' => $event['location'] ?? '',
                 'type' => $event['type'] ?? 'event',
@@ -141,14 +200,12 @@ class EditorController extends Controller
 
             Log::info('Event created:', [
                 'title' => $event['title'] ?? 'Untitled Event',
-                'date' => $parsedDate,
-                'time' => $event['time'] ?? '',
-                'location' => $event['location'] ?? '',
-                'type' => $event['type'] ?? 'event',
+                'start_date' => $parsedStart,
+                'end_date' => $parsedEnd,
             ]);
         }
 
-        $savedEvents = Event::orderBy('date')->get();
+        $savedEvents = Event::orderBy('start_date')->get();          // ← was 'date'
 
         DashboardController::clearCache();
 
@@ -178,7 +235,6 @@ class EditorController extends Controller
         Log::info('Saving payments:', ['count' => count($data)]);
 
         // Delete child rows first, then parent — respects the foreign key constraint.
-        // Using delete() instead of truncate() avoids MySQL's FK-truncate restriction entirely.
         PaymentItem::query()->delete();
         PaymentPeriod::query()->delete();
 
@@ -208,8 +264,8 @@ class EditorController extends Controller
                     }
                     $period->items()->create([
                         'name' => $item['name'] ?? 'New Service',
-                        'status' => in_array($item['status'] ?? '', ['pending', 'process', 'paid'])
-                                            ? $item['status'] : 'pending',
+                        'status' => in_array($item['status'] ?? '', ['pending', 'process', 'on-hold', 'paid'])
+                    ? $item['status'] : 'pending',
                         'display_order' => $itemIndex,
                     ]);
                 }

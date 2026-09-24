@@ -23,21 +23,14 @@ class PaymentPeriod extends Model
 
     public function getStatusAttribute(): string
     {
-        if ($this->items->isEmpty()) {
-            return 'empty';
-        }
+        if ($this->items->isEmpty()) return 'empty';
 
-        if ($this->items->every(fn ($item) => $item->status === 'paid')) {
-            return 'paid';
-        }
+        // On-hold anywhere in the period is the most urgent signal
+        if ($this->items->contains('status', 'on-hold')) return 'on-hold';
 
-        if ($this->items->every(fn ($item) => $item->status === 'pending')) {
-            return 'pending';
-        }
-
-        if ($this->items->contains('status', 'process')) {
-            return 'process';
-        }
+        if ($this->items->every(fn($i) => $i->status === 'paid')) return 'paid';
+        if ($this->items->contains('status', 'process')) return 'process';
+        if ($this->items->every(fn($i) => $i->status === 'pending')) return 'pending';
 
         return 'partial';
     }
